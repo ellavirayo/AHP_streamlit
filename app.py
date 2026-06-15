@@ -50,23 +50,25 @@ def display_pairwise_matrix(criteria, comparison_dict):
 
 # ---- Energy-specific interfaces ----
 def build_comparison_ui(energy_type, criteria_list):
-    """Create pairwise comparison table for a given energy type."""
+    """Create pairwise comparison UI using dropdowns (whole numbers 1–9)."""
     st.subheader(f"⚡ {energy_type} – Pairwise comparisons")
-    st.caption("Judge: How much more important is the **row criterion** compared to the **column criterion**?")
+    st.caption("Select how much more important the **row criterion** is than the **column criterion** (1 = equal, 9 = extreme). Reciprocals are automatically applied.")
     
     n = len(criteria_list)
     comparisons = {}
-    cols = st.columns(1)
-    with cols[0]:
-        for i in range(n):
-            for j in range(i+1, n):
-                key = f"{energy_type}_{i}_{j}"
-                value = st.number_input(
-                    f"**{criteria_list[i]}** vs **{criteria_list[j]}**",
-                    min_value=1.0/9.0, max_value=9.0, value=1.0, step=1.0, key=key,
-                    format="%.4f"
-                )
-                comparisons[f"{i}_{j}"] = value
+    
+    for i in range(n):
+        for j in range(i+1, n):
+            key = f"{energy_type}_{i}_{j}"
+            # Use a selectbox with integer options 1..9
+            value = st.selectbox(
+                label=f"**{criteria_list[i]}** vs **{criteria_list[j]}**",
+                options=[1, 2, 3, 4, 5, 6, 7, 8, 9],
+                index=0,  # default = 1 (equal importance)
+                key=key,
+                help="1 = equal, 3 = moderate, 5 = strong, 7 = very strong, 9 = extreme"
+            )
+            comparisons[f"{i}_{j}"] = float(value)  # store as float for matrix
     return comparisons
 
 def run_ahp(energy_type, criteria, comparisons):
