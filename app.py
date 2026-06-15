@@ -48,28 +48,64 @@ def display_pairwise_matrix(criteria, comparison_dict):
         matrix[j, i] = 1.0 / val if val != 0 else np.inf
     return matrix
 
-# ---- Energy-specific interfaces ----
-def build_comparison_ui(energy_type, criteria_list):
-    """Create pairwise comparison UI using dropdowns (whole numbers 1–9)."""
-    st.subheader(f"⚡ {energy_type} – Pairwise comparisons")
-    st.caption("Select how much more important the **row criterion** is than the **column criterion** (1 = equal, 9 = extreme). Reciprocals are automatically applied.")
+def build_matrix_ui(energy_type, criteria):
+    st.subheader(f"⚡ {energy_type} – Pairwise Comparison Matrix")
+    st.caption("⬆️ **Upper triangle (green background):** click to select 1–9. Lower triangle is automatic reciprocal.")
     
-    n = len(criteria_list)
-    comparisons = {}
+    n = len(criteria)
+    # Initialize session state for this energy type
+    matrix_key = f"matrix_{energy_type}"
+    if matrix_key not in st.session_state:
+        # Default: all 1's (equal importance)
+        st.session_state[matrix_key] = np.ones((n, n))
     
-    for i in range(n):
-        for j in range(i+1, n):
-            key = f"{energy_type}_{i}_{j}"
-            # Use a selectbox with integer options 1..9
-            value = st.selectbox(
-                label=f"**{criteria_list[i]}** vs **{criteria_list[j]}**",
-                options=[1, 2, 3, 4, 5, 6, 7, 8, 9],
-                index=0,  # default = 1 (equal importance)
-                key=key,
-                help="1 = equal, 3 = moderate, 5 = strong, 7 = very strong, 9 = extreme"
-            )
-            comparisons[f"{i}_{j}"] = float(value)  # store as float for matrix
-    return comparisons
+    # Create a form to capture all edits at once
+    with st.form(key=f"form_{energy_type}"):
+        # Build the matrix grid using columns
+        # First, create header row with criteria names
+        cols_header = st.columns([1.5] + [1] * n)  # extra space for row labels
+        cols_header[0].markdown("**Criteria →**")
+        for j, crit in enumerate(criteria):
+            cols_header[j+1].markdown(f"**{crit}**")
+        
+        # Store updated values temporarily
+        new_matrix = st.session_state[matrix_key].copy()
+        
+        # For each row
+        for i in range(n):
+            cols = st.columns([1.5] + [1] * n)
+            cols[0].markdown(f"**{criteria[i]}**")  # row label
+            for j in range(n):
+                if i == j:
+                    # Diagonal: fixed 1
+                    cols[j+1].markdown("1")
+                elif i < j:
+                    # Upper triangle: editable dropdown
+                    current_val = int(new_matrix[i, j])
+                    selected = cols[j+1].selectbox(
+                        label="",  # no extra label
+                        options=[1,2,3,4,5,6,7,8,9],
+                        index=current_val-1,
+                        key=f"{energy_type}_{i}_{j}",
+                        label_visibility="collapsed"
+                    )
+                    new_matrix[i, j] = float(selected)
+                    new_matrix[j, i] = 1.0 / float(selected)  # reciprocal
+                else:
+                    # Lower triangle: show reciprocal (read-only)
+                    reciprocal = new_matrix[i, j]
+                    if reciprocal == int(reciprocal):
+                        cols[j+1].markdown(f"{int(reciprocal)}")
+                    else:
+                        # show as fraction or decimal
+                        cols[j+1].markdown(f"{reciprocal:.3f}")
+        
+        # Submit button
+        submitted = st.form_submit_button("✅ Update matrix and calculate priorities")
+        if submitted:
+            st.session_state[matrix_key] = new_matrix
+            return new_matrix
+    return None
 
 def run_ahp(energy_type, criteria, comparisons):
     """Run full AHP and display results."""
