@@ -2,17 +2,17 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 
-st.set_page_config(page_title="AHP Priority Calculator", layout="wide")
+st.set_page_config(page_title="AHP Priority Calculator", layout="centered")
 st.title("🌿 AHP Priority Calculator – Energy Suitability Mapping")
 st.markdown("""
-**Pairwise comparison matrix for Solar, Wind, and Biomass suitability.**  
+**Pairwise comparisons for Solar, Wind, and Biomass suitability**  
 Use Saaty's 1–9 scale:  
-*1 = equal importance, 3 = moderate, 5 = strong, 7 = very strong, 9 = extreme.*  
-**Only fill the upper triangle** (green cells). The rest is automatic.  
-Goal: Consistency Ratio (CR) < 0.10.
+1 = Equal importance, 3 = Moderate, 5 = Strong, 7 = Very strong, 9 = Extreme  
+(2,4,6,8 are intermediate values).  
+**Goal:** Consistency Ratio (CR) < 0.10  
 """)
 
-# ---- AHP core functions (unchanged) ----
+# ---- AHP core functions ----
 def get_ri(n):
     ri_dict = {1:0.00,2:0.00,3:0.58,4:0.90,5:1.12,6:1.24,7:1.32,8:1.41,9:1.45,10:1.49}
     return ri_dict.get(n, 1.51)
@@ -32,67 +32,86 @@ def check_consistency(matrix, priority):
     CR = CI / RI if RI != 0 else 0.0
     return lambda_max, CI, CR
 
-# ---- New: matrix table UI with dropdowns (whole numbers only) ----
-def build_matrix_ui(energy_type, criteria):
-    st.subheader(f"⚡ {energy_type} – Pairwise Comparison Matrix")
-    st.caption("⬆️ **Upper triangle (green background):** click to select 1–9. Lower triangle is automatic reciprocal.")
+# ---- BPMSG-style pairwise comparison UI ----
+def build_comparisons_ui(energy_type, criteria):
+    st.subheader(f"⚡ {energy_type} – Pairwise Comparisons")
+    st.caption("For each pair, indicate which criterion is more important and by how much (1–9).")
     
     n = len(criteria)
-    # Initialize session state for this energy type
-    matrix_key = f"matrix_{energy_type}"
-    if matrix_key not in st.session_state:
-        # Default: all 1's (equal importance)
-        st.session_state[matrix_key] = np.ones((n, n))
+    comparisons = {}  # store (i, j) -> strength (float)
     
-    # Create a form to capture all edits at once
-    with st.form(key=f"form_{energy_type}"):
-        # Build the matrix grid using columns
-        # First, create header row with criteria names
-        cols_header = st.columns([1.5] + [1] * n)  # extra space for row labels
-        cols_header[0].markdown("**Criteria →**")
-        for j, crit in enumerate(criteria):
-            cols_header[j+1].markdown(f"**{crit}**")
+    # Generate all pairs (i < j)
+    pairs = []
+    for i in range(n):
+        for j in range(i+1, n):
+            pairs.append((i, j, criteria[i], criteria[j]))
+    
+    # Create a table-like layout using columns
+    for idx, (i, j, crit_i, crit_j) in enumerate(pairs):
+        st.markdown("---")
+        cols = st.columns([2, 1, 1, 2])
         
-        # Store updated values temporarily
-        new_matrix = st.session_state[matrix_key].copy()
+        with cols[0]:
+            st.write(f"**{crit_i}**  vs  **{crit_j}**")
         
-        # For each row
-        for i in range(n):
-            cols = st.columns([1.5] + [1] * n)
-            cols[0].markdown(f"**{criteria[i]}**")  # row label
-            for j in range(n):
-                if i == j:
-                    # Diagonal: fixed 1
-                    cols[j+1].markdown("1")
-                elif i < j:
-                    # Upper triangle: editable dropdown
-                    current_val = int(new_matrix[i, j])
-                    selected = cols[j+1].selectbox(
-                        label="",  # no extra label
-                        options=[1,2,3,4,5,6,7,8,9],
-                        index=current_val-1,
-                        key=f"{energy_type}_{i}_{j}",
-                        label_visibility="collapsed"
-                    )
-                    new_matrix[i, j] = float(selected)
-                    new_matrix[j, i] = 1.0 / float(selected)  # reciprocal
-                else:
-                    # Lower triangle: show reciprocal (read-only)
-                    reciprocal = new_matrix[i, j]
-                    if reciprocal == int(reciprocal):
-                        cols[j+1].markdown(f"{int(reciprocal)}")
-                    else:
-                        # show as fraction or decimal
-                        cols[j+1].markdown(f"{reciprocal:.3f}")
+        # Choice: A, Equal, or B
+        choice_key = f"{energy_type}_choice_{i}_{j}"
+        choice = st.radio(
+            "Which is more important?",
+            options=[crit_i, "Equal", crit_j],
+            index=1,  # default Equal
+            key=choice_key,
+            horizontal=True,
+            label_visibility="collapsed"
+        )
         
-        # Submit button
-        submitted = st.form_submit_button("✅ Update matrix and calculate priorities")
-        if submitted:
-            st.session_state[matrix_key] = new_matrix
-            return new_matrix
-    return None
+        strength = 1.0  # default equal
+        
+        if choice == crit_i:
+            # A is more important
+            strength = st.selectbox(
+                f"How much more important is {crit_i} than {crit_j}?",
+                options=[2,3,4,5,6,7,8,9],
+                index=0,
+                key=f"{energy_type}_str_{i}_{j}",
+                label_visibility="collapsed"
+            )
+            comparisons[f"{i}_{j}"] = float(strength)   # a_ij = strength
+        elif choice == crit_j:
+            # B is more important
+            strength = st.selectbox(
+                f"How much more important is {crit_j} than {crit_i}?",
+                options=[2,3,4,5,6,7,8,9],
+                index=0,
+                key=f"{energy_type}_str_{i}_{j}",
+                label_visibility="collapsed"
+            )
+            comparisons[f"{i}_{j}"] = 1.0 / float(strength)  # a_ij = 1/strength
+        else:  # Equal
+            comparisons[f"{i}_{j}"] = 1.0
+        
+        # Show current numerical value (optional)
+        if strength == 1:
+            st.caption("→ Equal importance (1)")
+        elif choice == crit_i:
+            st.caption(f"→ {crit_i} is {strength} times more important than {crit_j}")
+        else:
+            st.caption(f"→ {crit_j} is {strength} times more important than {crit_i}")
+    
+    return comparisons
 
-def run_ahp(energy_type, criteria, matrix):
+def build_matrix_from_comparisons(criteria, comparisons):
+    n = len(criteria)
+    matrix = np.eye(n)
+    for i in range(n):
+        for j in range(i+1, n):
+            val = comparisons.get(f"{i}_{j}", 1.0)
+            matrix[i, j] = val
+            matrix[j, i] = 1.0 / val
+    return matrix
+
+def run_ahp(energy_type, criteria, comparisons):
+    matrix = build_matrix_from_comparisons(criteria, comparisons)
     priorities = ahp_priority(matrix)
     lambda_max, CI, CR = check_consistency(matrix, priorities)
     
@@ -109,7 +128,8 @@ def run_ahp(energy_type, criteria, matrix):
     if CR < 0.1:
         st.success(f"✅ Consistency Ratio = {CR:.3f} (< 0.10) → Consistent.")
     else:
-        st.warning(f"⚠️ Consistency Ratio = {CR:.3f} (≥ 0.10) → Please revise the matrix above.")
+        st.warning(f"⚠️ Consistency Ratio = {CR:.3f} (≥ 0.10) → Please revise some comparisons.")
+    
     return df, CR
 
 # ---- Main app ----
@@ -126,19 +146,25 @@ criteria_sets = {
 
 criteria = criteria_sets[energy_option]
 
-# Show criteria in sidebar
 st.sidebar.markdown(f"**Criteria for {energy_option} suitability:**")
 for c in criteria:
     st.sidebar.markdown(f"- {c}")
 
-# Build matrix UI and get matrix if submitted
-matrix = build_matrix_ui(energy_option, criteria)
+# Session state to remember comparisons per energy type
+if "all_comparisons" not in st.session_state:
+    st.session_state.all_comparisons = {}
 
-if matrix is not None:
-    run_ahp(energy_option, criteria, matrix)
-else:
-    # Optionally show a placeholder
-    st.info("👆 Fill the upper triangle (green dropdowns) and click **Update matrix** to see priorities.")
+# Build the UI for the selected energy type
+comparisons = build_comparisons_ui(energy_option, criteria)
+
+if st.button("🚀 Calculate Priorities", type="primary"):
+    st.session_state.all_comparisons[energy_option] = comparisons
+    run_ahp(energy_option, criteria, comparisons)
+
+# Optional: show previous results if they exist
+if energy_option in st.session_state.all_comparisons:
+    if st.button("🔄 Recalculate (after changes)"):
+        run_ahp(energy_option, criteria, st.session_state.all_comparisons[energy_option])
 
 st.markdown("---")
-st.caption("AHP implementation matches bpmsg.com calculator. The matrix view makes all comparisons visible at once.")
+st.caption("Interface replicates bpmsg.com AHP calculator. Input is intuitive: choose which criterion dominates, then how much (2–9).")
